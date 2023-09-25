@@ -1,0 +1,106 @@
+/* INCOME STATEMENT METRICS */
+
+-- STEP 1:  CREATE DETAILED INCOME STATEMENT
+create or replace table HUNTER_IS_TEMP as
+select 
+accounting_period_end_date,
+summary_header,
+left(gl_account_number,2)||'000 - '||sub_fsli_1 as financial_category,
+gl_account_number ||' - '||gl_account_description as account,
+sum(amount) as amount
+from TX54989_OA071323_GRAIN_HUNTER_OA.RPT.INCOME_STATEMENT
+where 1=1
+and (sub_fsli_1 in (
+'Data Revenue',
+'Voice Revenue',
+'Regulatory',
+'Other Revenue',
+'Voice Cost of Service',
+'Data Cost of Service', 
+'Other Cost of Service',
+'Wages, taxes, and benefits',
+'Sales and Marketing Expenses',
+'Operational Expenses'
+)
+or summary_header in (
+'Other Expenses',
+'Net Income (Loss)'
+))
+and accounting_period_end_date>='2021-01-01'
+group by 1,2,3,4
+;
+
+--END----------------------------------------------------------------------
+--STEP 2:  Create Summarized Income Statement extract for Power BI visual (filename IS_MONTHLY_SUMMARY.csv)
+
+select 
+accounting_period_end_date,
+case
+    when account in ('42005 - Hunter-at-Home 950 Mbps',
+            '42010 - Hunter-at-Home 500 Mbps',
+            '42015 - Hunter-at-Home 100 Mbps',
+            '42020 - Hunter-at-Home Router Rental',
+            '42025 - Residential Bulk Data',
+            '43005 - Fiber - Service',
+            '43010 - Wireless - Service',
+            '43015 - DSL - Service',
+            '43020 - Data Add-Ons',
+            '43025 - Wireless - Install'
+            ) then 'Residential_Data'
+    when account in ('44100 - Dedicated Fiber',
+            '44105 - Dark Fiber',
+            '44110 - Transport Income',
+            '44115 - Small Business Internet',
+            '44120 - Colocation Income',
+            '44125 - IP Address',
+            '44130 - Property Tax Recovery Fee',
+            '44135 - Data Equipment',
+            '44140 - Other - Network Income',
+            '44155 - Fiber Installation'
+            ) then 'Commercial_Data'
+    when financial_category in ('44000 - Voice Revenue') then 'Voice_Revenue'
+    when financial_category in ('48000 - Regulatory','49000 - Other Revenue') then 'Other_Revenue'
+    when financial_category in ('51000 - Data Cost of Service') then 'Data_Cost_of_Service'
+    when financial_category in ('53000 - Other Cost of Service','52000 - Voice Cost of Service') then 'Other_Cost_of_Service'
+    when account in (
+            '61005 - Payroll Wages',
+            '61010 - Incentive Bonus',
+            '61015 - Payroll Taxes',
+            '61020 - Workers Compensation Expense',
+            '61025 - Payroll - Overtime',
+            '61030 - Payroll - Other',
+            '61100 - Recruiting Expenses',
+            '61105 - Employee Expenses',
+            '61110 - Employee Relations',
+            '61200 - 401K Expenses',
+            '61205 - Employee Benefit Expense',
+            '61215 - Vacation Expense',
+            '61300 - Payroll Processing Expense',
+            '61400 - Capitalized Labor Expense'   
+    ) then 'Labor'
+    when financial_category in (
+            '61000 - Operational Expenses',
+            '62000 - Operational Expenses'
+            ) 
+    or account in (
+            '71100 - Amortized Revenue - ASC 805',
+            '71200 - Non-recurring expense',
+            '71205 - (Gain)/Loss Disposition Asset',
+            '71215 - Patronage Income/Expense',
+            '71300 - Transaction Expense'
+) then 'Operational_Expenses'
+     when financial_category in (
+            '63000 - Sales and Marketing Expenses'
+            ) then 'Sales_Mktg_Expenses'
+    end financial_category_l2,   
+sum(amount) as amount
+from DEV.HUNTER_TRANSFORM_SCHEMA.HUNTER_IS_TEMP
+where 1=1
+--and accounting_period_end_date='2023-06-30'
+and financial_category_l2 is not null
+group by 1,2
+order by 1,2
+;
+
+--END----------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------

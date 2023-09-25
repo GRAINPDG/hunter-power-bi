@@ -1,0 +1,54 @@
+create or replace HUNTER_FIBERREADY_COHORT as
+with total_fiber_passings as (
+    select 
+        distinct
+        a.ID, 
+        upper(a.NAME) as street_address,
+        upper(a.CHKPOINT__A_CITY__C) as city,
+        upper(a.CHKPOINT__A_STATE__C) as state,
+        a.CHKPOINT__A_ZIP__C as postal_zip,
+        upper(a.CHKPOINT__A_COUNTY__C) as county,
+        upper(a.region__c) as region_name,
+        upper(a.FORM_GROUP__C) as form_group,
+        upper(a.CABINET_CMTS__C) as cabinet_cmts,
+        upper(a.UTILITY_TYPE__C) as utility_type,
+        upper(a.LAND_USE_TYPE__C) as land_use_type,
+        upper(a.SERVICE_GROUP__C) as service_group,
+        upper(b.friendly_name__c) as friendly_name,
+        a.CHKPOINT__LOCATION__LATITUDE__S as latitude,
+        a.CHKPOINT__LOCATION__LONGITUDE__S as longitude,
+        DATE_TRUNC('MONTH', fiber_ready_date__c) as fiber_ready_period,
+        case when a.ID IS NOT NULL then 1 else 0 end fiber_passing
+    from (select * from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_SALESFORCE.CHKPOINT__SERVICE_ADDRESS__C where fiber_ready_date__c IS NOT NULL) a
+    join (select ID, friendly_name__c from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_SALESFORCE.CHKPOINT__FIBERHOOD__C) b
+    on a.CHKPOINT__FIBERHOOD__C=b.ID 
+    --where fiber_ready_period='2023-07-01'
+    ),
+    hunter_customer_activity as (
+    select 
+        period,
+        street_address,
+        bop_customers,
+        eop_customers,
+        sum(activated) as connects,
+        sum(disconnected) as disconnects,
+        sum(net_activations) as net_activations
+    from DEV.HUNTER_TRANSFORM_SCHEMA.HUNTER_CUSTOMER_ACTIVITY
+    group by 1,2,3,4
+    )
+select 
+    a.*,
+    b.period,
+    b.bop_customers,
+    b.eop_customers,
+    b.connects,
+    b.disconnects,
+    b.net_activations,
+    fiber_passing / count(*) over (partition by a.street_address) as wgt_fiber_passings
+from total_fiber_passings a
+left join hunter_customer_activity b
+on a.street_address=b.street_address
+;
+
+--END------------------------------------------------------------
+-----------------------------------------------------------------

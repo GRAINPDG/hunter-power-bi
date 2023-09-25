@@ -1,0 +1,371 @@
+--STEP 1/6:  CREATE THE CUSTOMER_HIST_TEMP table
+
+create or replace table CUSTOMER_HIST_TEMP as
+select distinct 
+    case when a.account_number<>'' then cast(a.account_number as VARCHAR(32)) else cast(a.customer_id as VARCHAR(32)) end as account_number,
+    a.customer_id,
+    case 
+            when a.class in ('BUSINESS') and upper(b.company_name) is not null or b.company_name <> '' 
+            then upper(b.company_name) 
+            else upper(concat(b.first_name || ' ' || b.last_name))
+            end as customer_name,
+    fields[74].value::VARCHAR as primary_contact,
+    case
+        when b.line_2<>'' then trim(regexp_replace(upper(concat(b.line_1||' '||b.line_2||' '||b.city)),'\\.|\\.','')) 
+        else trim(regexp_replace(upper(concat(b.line_1||' '||b.line_2||''||b.city)),'\\.|\\.',''))
+        end as street_address,
+    upper(b.city) as city,
+    upper(b.state_or_province) as state_or_province,
+    b.postal_code,
+    upper(a.status) as  customer_status,
+    upper(a.class) as class,
+    upper(fields[38].value::VARCHAR) as vertical_market,
+    upper(fields[42].value::VARCHAR) as region,
+    upper(fields[29].value::VARCHAR) as salesperson,
+    upper(fields[4].value::VARCHAR) as install_type,
+    upper(fields[93].value::VARCHAR) as cabinet_cmts,
+    upper(fields[95].value::VARCHAR) as mdu,
+    upper(fields[96].value::VARCHAR) as mdu_name,
+    fields[73].value::VARCHAR as circuit_number,
+    fields[76].value::VARCHAR as orig_contract_date,
+    fields[77].value::VARCHAR as data_contract_date,
+    fields[82].value::VARCHAR as data_term_end_date,
+    fields[90].value::VARCHAR as data_installed_date,
+    fields[80].value::VARCHAR as data_term_activation,
+    fields[81].value::VARCHAR as data_months_of_term,
+    fields[108].value::VARCHAR as voice_contract_date,
+    fields[104].value::VARCHAR as voice_term_end_date,
+    fields[72].value::VARCHAR as voice_effective_date,
+    fields[78].value::VARCHAR as voice_term_activation,
+    fields[109].value::VARCHAR as voice_months_of_term,
+    fields[79].value::VARCHAR as managed_it_term_activation,
+    fields[84].value::VARCHAR as voice_contract_notes,
+    fields[85].value::VARCHAR as contract_notes,
+    fields[157].value::VARCHAR as sf_address_id,
+    fields[158].value::VARCHAR as census_tract,
+    finance:amount_due as amount_due,
+    finance:amount_overdue as amount_overdue,
+    finance:balance as balance,
+    finance:bill_profile_id as bill_profile,
+    upper(c.description) as bill_profile_description,
+    finance:billing_method::VARCHAR as billing_method,
+    finance:cycle_date::VARCHAR as cycle_date,
+    cast(a.activated_date as date) as activated_date, 
+    case when a.status in ('OPEN') then datediff(day,a.activated_date,current_date()) else 0 end as tenure_days,
+    case when a.status in ('OPEN') then datediff(month,a.activated_date,current_date()) else 0 end as tenure_months,
+    case when a.status in ('OPEN') then datediff(year,a.activated_date,current_date()) else 0 end as tenure_years,
+    case 
+        when a.status in ('OPEN') and datediff(month,a.activated_date,current_date())<=6 then '0 TO 6 MTHS'
+        when a.status in ('OPEN') and (datediff(month,a.activated_date,current_date())>6 and datediff(month,a.activated_date,current_date())<=12) then '6 TO 12 MTHS'
+        when a.status in ('OPEN') and (datediff(month,a.activated_date,current_date())>12 and datediff(month,a.activated_date,current_date())<=24) then '12 TO 24 MTHS'
+        when a.status in ('OPEN') and (datediff(month,a.activated_date,current_date())>24 and datediff(month,a.activated_date,current_date())<=36) then '24 TO 36 MTHS'
+        when a.status in ('OPEN') and datediff(month,a.activated_date,current_date())>36 then 'LONG TENURED CUSTOMERS >36 MTHS'
+        else ''
+        end TENURE_CLASS,
+    cast(a.close_date as date) as disconnect_date
+from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_REV_IO.CUSTOMERSOPTIMIZED a
+left join TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_REV_IO.ADDRESSES b
+on a.service_address_id = b.address_id
+left join TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_REV_IO.BILLPROFILES c
+on a.bill_profile_id = c.bill_profile_id
+left join (select customer_id, finance from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_REV_IO.CUSTOMERS) d
+on a.customer_id = d.customer_id
+--left join address_fcts_temp e
+--on (a.customer_id=e.revio_account_number
+--    or trim(regexp_replace(upper(concat(b.line_1 || ' ' || b.line_2)),'\\.|\\.','')) = trim(e.sf_street_address))  --the address is used as secondary join in case revio_account_number does not exist
+--where a.customer_id='11258'
+order by a.customer_id
+;
+
+
+--END----------------------------------------------------------------------------------------------------------
+
+--STEP 2/6: CREATE THE ADDRESS_FCTS_TEMP table
+create or replace table ADDRESS_FCTS_TEMP as
+select 
+    distinct
+    a.id as sf_id,
+    a.CHKPOINT__FIBERHOOD__C as sf_fiberhood_id,
+    c.revio_account_number,
+    upper(b.name) as sf_fiberhood_name,
+    upper(b.region__c) as sf_region,
+    upper(b.form_group__c) as sf_form_group,
+    upper(b.cabinet_cmts__c) as sf_cabinet_cmts,
+    upper(b.friendly_name__c) as sf_friendly_name,
+    trim(upper(a.name)) as sf_name,
+    trim(upper(a.chkpoint__a_street_name__c)) as sf_street_address,
+    upper(a.chkpoint__a_unit__c) as sf_unit,
+    upper(a.chkpoint__a_city__c) as sf_city,
+    upper(a.chkpoint__a_state__c) as sf_state_or_province,
+    a.chkpoint__a_zip__c as sf_postal_code,
+    upper(a.chkpoint__a_county__c) as sf_county,
+    a.chkpoint__location__latitude__s as sf_latitude,
+    a.chkpoint__location__longitude__s as sf_longitude,
+    b.chkpoint__total_addresses__c as sf_fiberhood_total_addresses,
+    a.fiberhood_date__c as sf_fiberhood_date,
+    a.fiber_ready_date__c as sf_fiber_ready_date,
+    b.SERVICE_TERRITORY__C as service_territory
+from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_SALESFORCE.CHKPOINT__SERVICE_ADDRESS__C  a
+join TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_SALESFORCE.CHKPOINT__FIBERHOOD__C b   
+on a.CHKPOINT__FIBERHOOD__C = b.id
+left join (
+            select 
+                sf_customer_id,
+                revio_account_number,
+                max(day)
+            from TX54989_OA071323_GRAIN_HUNTER_OA.RPT.SERVICEABLE_ACCOUNTS_MASTER
+            group by 1,2
+            ) c
+on a.id = c.sf_customer_id
+where 1=1
+--and a.id ='a0T4x000001wSWZEA2'
+and b.region__c<>''                      --Remove address records that are not assigned to any Region.  This remove ~600K addresses
+and (b.name IS NOT NULL or b.name<>'')
+;
+
+
+select * from TX54989_OA071323_GRAIN_HUNTER_RAW_SHARE.HUNTER_SALESFORCE.CHKPOINT__FIBERHOOD__C limit 100;
+--END----------------------------------------------------------------------------------------------------------
+
+--STEP 3/6: CREATE THE DAILY_REVENUE_SUMMARIZED by Month-Year table
+
+create or replace table DAILY_REVENUE_SUMMARIZED as
+select
+    distinct
+    t1.customer_id,
+    DATE_TRUNC('MONTH', t1.day) as month_year,
+    sum(t1.activated_amount) as activated_amount,
+    sum(t1.disconnected_amount) as disconnected_amount,
+    sum(t1.net_mrc_amount) as net_mrc_amount,
+    max(t1.disconnected) as disconnected,
+    max(t1.activated) as activated
+from TX54989_OA071323_GRAIN_HUNTER_OA.RPT.DAILY_REVENUE t1
+where 1=1
+--and t1.customer_id=176
+and (t1.day>='2017-07-01')
+group by 1,2
+order by 2,3
+;
+
+--END----------------------------------------------------------------------------------------------------------
+
+--STEP 4/6: CREATE THE DAILY_REVENUE_FCT_TEMP table
+
+create or replace table DAILY_REVENUE_FCT_TEMP as
+with daily_revenue as (
+    select
+    customer_id,
+    month_year,
+    activated_amount,
+    disconnected_amount,
+    net_mrc_amount,
+    --year,
+    --month,
+    activated,
+    disconnected,
+    CASE
+        WHEN activated = 1 
+            OR (SUM(activated) OVER (PARTITION BY customer_id, month_year ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) > 0 
+            AND SUM(disconnected) OVER (PARTITION BY customer_id, month_year ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) = 0) 
+            THEN 1
+            ELSE 0
+        END AS installs,
+    CASE
+        WHEN disconnected = 1 
+        OR SUM(disconnected) OVER (PARTITION BY customer_id, month_year ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) > 0  
+        THEN 1
+        ELSE 0
+    END AS disconnects,
+    CASE
+        WHEN Activated = 1 
+            OR (SUM(activated) OVER (PARTITION BY customer_id ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) > 0 
+            AND SUM(disconnected) OVER (PARTITION BY customer_id ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) = 0) 
+            OR SUM(activated_amount) OVER (PARTITION BY customer_id ORDER BY month_year asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) <> 0
+            THEN 1
+            ELSE 0
+        END AS customers,
+    installs - disconnects as net_activations,
+    customers - net_activations as bop_customers
+    from DAILY_REVENUE_SUMMARIZED
+    --where customer_id=5438
+    order by month_year asc
+)
+select
+    customer_id,
+    month_year,
+    sum(activated_amount) as activated_amount,
+    sum(disconnected_amount) as disconnected_amount,
+    sum(net_mrc_amount) as net_mrc_amount,
+    sum(installs) as installs,
+    sum(disconnects) as disconnects,
+    sum(net_activations) as net_activations,
+    max(customers) as eop_customers,
+    max(bop_customers) as bop_customers,
+    case when eop_customers =1 then 'OPEN' else 'CLOSED' end as status
+from daily_revenue
+group by 1,2
+order by 1,2
+;
+
+--END----------------------------------------------------------------------------------------------------------
+
+ --STEP 5/6:  SPOOL OUT HUNTER_CUSTOMER_ACTIVITY.csv AND SAVE TO HunterPBI FOLDER
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--The purpose of the code below is to join the HUNTER_CUSTOMER_ACTIVITY table to the DAILY_REVENUE table to compile the HUNTER_CUSTOMER_ACTIVITY.csv output      ----
+--For the final production version, this code should result in a materialized view with daily updates.                                                           ----
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+create or replace table HUNTER_CUSTOMER_ACTIVITY as
+with daily_rev as(
+    select
+    distinct
+    customer_id,
+    month_year,
+    activated_amount,
+    disconnected_amount,
+    net_mrc_amount,
+    installs,
+    disconnects,
+    net_activations,
+    eop_customers,
+    bop_customers,
+    status
+from DEV.HUNTER_TRANSFORM_SCHEMA.DAILY_REVENUE_FCT_TEMP
+),
+customer_fcts as(
+    select
+    distinct
+    *
+    from DEV.HUNTER_TRANSFORM_SCHEMA.CUSTOMER_HIST_TEMP
+),
+address_fcts as(
+    select
+    distinct
+    *
+    from DEV.HUNTER_TRANSFORM_SCHEMA.ADDRESS_FCTS_TEMP
+    where (sf_name IS NOT NULL or sf_name<>'')
+)
+select
+    distinct
+    t2.customer_id,
+    t2.account_number,
+    t1.month_year as period,
+    YEAR(t1.month_year) as year,
+    t2.class as customer_class,
+    t2.vertical_market,
+    t2.region,
+    t2.salesperson,
+    t2.install_type,
+    t2.cabinet_cmts,
+    t2.mdu,
+    t2.mdu_name,
+    t2.circuit_number,
+    t2.bill_profile,
+    t2.bill_profile_description,
+    t2.billing_method,
+    t2.activated_date,
+    t2.customer_name,   
+    t2.primary_contact,
+    t2.street_address,
+    t2.city,
+    t2.state_or_province,
+    t2.postal_code,
+    t1.activated_amount,
+    t1.disconnected_amount,
+    t1.net_mrc_amount,
+    t1.disconnects as disconnected,
+    t1.installs as activated,
+    max(t3.sf_fiberhood_name) as sf_fiberhood_name,
+    max(t3.sf_friendly_name) as sf_friendly_name,
+    max(t3.sf_county) as sf_county,
+    max(t3.sf_latitude) as sf_latitude,
+    max(t3.sf_longitude) as sf_longitude,
+    max(t3.sf_fiberhood_date) as sf_fiberhood_date,
+    max(t3.sf_fiber_ready_date) as sf_fiber_ready_date,
+    max(t3.sf_fiberhood_total_addresses) as sf_fiberhood_total_addresses,
+    t1.net_activations,
+    t1.eop_customers,
+    t1.bop_customers,
+    t1.status,
+    case
+        when t1.disconnects>0 then cast(t2.disconnect_date as date) else NULL
+        end as disconnect_date,
+    /*case 
+        when t1.status in ('OPEN') and datediff(day,t2.activated_date,t1.month_year)<(30.4*6) then '[1] LESS THAN 6 MONTHS'
+        when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>=(30.4*6) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*12)) then '[2] 6 TO 12 MTHS'
+        when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>(30.4*12) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*24)) then '[3] 13 TO 24 MTHS'
+        when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>(30.4*24) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*36)) then '[4] 25 TO 36 MTHS'
+        when t1.status in ('OPEN') and datediff(day,t2.activated_date,t1.month_year)>(30.4*36) then '[5] GT3 YEARS'
+        else ''
+        end TENURE_CLASS,*/
+    case 
+        when t1.status in ('OPEN') and datediff(day,t2.activated_date,t1.month_year)<(30.4*12) then '[1] LESS THAN 1 YEAR'
+        when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>=(30.4*12) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*36)) then '[2] 1 TO 3 YEARS'
+        --when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>(30.4*12) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*24)) then '[3] 13 TO 24 MTHS'
+        --when t1.status in ('OPEN') and (datediff(day,t2.activated_date,t1.month_year)>(30.4*24) and datediff(day,t2.activated_date,t1.month_year)<=(30.4*36)) then '[4] 25 TO 36 MTHS'
+        when t1.status in ('OPEN') and datediff(day,t2.activated_date,t1.month_year)>(30.4*36) then '[5] GREATER THAN 3 YEARS'
+        else ''
+        end TENURE_CLASS,
+    case when t1.status in ('OPEN') then datediff(day,t2.activated_date,t1.month_year) else 0 end as tenure_days,
+    case when t1.status in ('OPEN') then datediff(month,t2.activated_date,t1.month_year) else 0 end as tenure_months,
+    case when t1.status in ('OPEN') then datediff(year,t2.activated_date,t1.month_year) else 0 end as tenure_years,
+    max(t3.sf_id) as sf_id,
+    max(t2.census_tract) as census_tract,
+     max(t3.service_territory) as service_territory
+from daily_rev t1
+left join customer_fcts t2
+on t1.customer_id=t2.customer_id
+left join address_fcts t3
+--on t1.customer_id = t3.revio_account_number
+on trim(cast(t2.street_address as varchar(400))) = trim(cast(t3.sf_name as varchar(400)))
+where 1=1
+--and t1.month_year='7/1/2023'
+--and t3.sf_fiber_ready_date>='7/1/2023'
+--and t1.customer_id=25889
+--and t1.disconnects=0 
+--and t2.disconnect_date is not null
+group by
+    t2.customer_id,
+    t2.account_number,
+    t1.month_year,
+    YEAR(t1.month_year),
+    t2.class,
+    t2.vertical_market,
+    t2.region,
+    t2.salesperson,
+    t2.install_type,
+    t2.cabinet_cmts,
+    t2.mdu,
+    t2.mdu_name,
+    t2.circuit_number,
+    t2.bill_profile,
+    t2.bill_profile_description,
+    t2.billing_method,
+    t2.activated_date,
+    t2.customer_name,   
+    t2.primary_contact,
+    t2.street_address,
+    t2.city,
+    t2.state_or_province,
+    t2.postal_code,
+    t1.activated_amount,
+    t1.disconnected_amount,
+    t1.net_mrc_amount,
+    t1.disconnects,
+    t1.installs,
+    t1.net_activations,
+    t1.eop_customers,
+    t1.bop_customers,
+    t1.status,
+    disconnect_date,
+    TENURE_CLASS,
+    tenure_days,
+    tenure_months,
+    tenure_years
+order by t2.customer_id, t1.month_year asc
+;
+--END----------------------------------------------------------------------------------------------------------
+--STEP 6/6:  Spool out Power BI extract
+select *
+from DEV.HUNTER_TRANSFORM_SCHEMA.HUNTER_CUSTOMER_ACTIVITY
+;
+--END----------------------------------------------------------------------------------------------------------
